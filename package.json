@@ -1,0 +1,10 @@
+{
+  "name": "revelateur-photo",
+  "version": "1.0.0",
+  "description": "See and strip the personal metadata in your photos, and read their C2PA provenance. 100% in the browser.",
+  "license": "MIT",
+  "author": "Kevin Aquino (SOSPC82)",
+  "private": true,
+  "scripts": { "test": "node tests/run.js" },
+  "devDependencies": { "playwright": "^1.48.0" }
+}

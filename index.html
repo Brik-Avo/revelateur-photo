@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="Révélateur photo : voyez et retirez les métadonnées personnelles (GPS, appareil, auteur) de vos photos, et lisez leur provenance C2PA. 100 % local, open source.">
+<style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<title>Révélateur photo</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout : une table lumineuse — dépôt en haut, deux fiches côte à côte (vie privée / provenance), barre d'action en pied. */
+:root{
+  --bg:#EEF0EE; --surface:#FFFFFF; --ink:#15191C; --muted:#5A636A; --line:#D6DAD8;
+  --accent:#1D4E9E; --accent-soft:#E2E9F5;
+  --risk:#B0351E; --risk-soft:#F8E4DF; --warn:#8C5C00; --warn-soft:#F6ECD6; --ok:#1C7148; --ok-soft:#DDF0E5;
+  --display:"Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --body:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0E1214; --surface:#161B1E; --ink:#E6EAEC; --muted:#97A1A8; --line:#283035;
+  --accent:#86ABF2; --accent-soft:#18243B;
+  --risk:#F2907A; --risk-soft:#3A1D17; --warn:#E4B65C; --warn-soft:#33270F; --ok:#6FCB9B; --ok-soft:#132E20; color-scheme:dark; } }
+:root[data-theme="dark"]{
+  --bg:#0E1214; --surface:#161B1E; --ink:#E6EAEC; --muted:#97A1A8; --line:#283035;
+  --accent:#86ABF2; --accent-soft:#18243B;
+  --risk:#F2907A; --risk-soft:#3A1D17; --warn:#E4B65C; --warn-soft:#33270F; --ok:#6FCB9B; --ok-soft:#132E20; color-scheme:dark; }
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.55 var(--body);}
+.wrap{max-width:1100px;margin:0 auto;padding-block:28px 48px;padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));display:flex;flex-direction:column;gap:22px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 24px}
+h1{font:800 clamp(30px,5vw,46px)/1 var(--display);letter-spacing:-.02em;margin:0;text-wrap:balance}
+.lede{margin:6px 0 0;color:var(--muted);max-width:60ch}
+.local{display:inline-flex;align-items:center;gap:8px;font:500 12px/1 var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--ok);background:var(--ok-soft);padding:8px 12px;border-radius:999px}
+.local::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+
+.drop{position:relative;border:1.5px dashed var(--line);border-radius:14px;background:var(--surface);padding:22px;display:flex;flex-wrap:wrap;align-items:center;gap:16px 22px;transition:border-color .15s, background .15s}
+.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.drop svg{flex:none;color:var(--accent)}
+.drop .txt{flex:1 1 260px;min-width:0}
+.drop strong{font:600 17px/1.3 var(--display)}
+.drop p{margin:2px 0 0;color:var(--muted);font-size:13.5px}
+.btn{appearance:none;border:0;cursor:pointer;font:600 14px/1 var(--body);padding:12px 18px;border-radius:10px;background:var(--accent);color:var(--surface);display:inline-flex;align-items:center;gap:8px}
+.btn.ghost{background:transparent;color:var(--accent);box-shadow:inset 0 0 0 1.5px var(--accent)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn:focus-visible,.drop:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+input[type=file]{position:absolute;width:1px;height:1px;opacity:0}
+
+.banner{font-size:13.5px;color:var(--warn);background:var(--warn-soft);border-radius:10px;padding:10px 14px}
+.error{color:var(--risk);background:var(--risk-soft)}
+
+.filebar{display:flex;flex-wrap:wrap;gap:14px 18px;align-items:center}
+.thumb{width:72px;height:72px;border-radius:8px;object-fit:cover;background:var(--line);flex:none}
+.fileinfo{flex:1 1 220px;min-width:0}
+.fileinfo b{display:block;font:600 16px/1.3 var(--display);overflow-wrap:anywhere}
+.meta-line{font:13px/1.5 var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
+
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+@media (max-width:820px){.grid{grid-template-columns:1fr}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.eyebrow{font:500 11.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.panel h2{font:600 22px/1.2 var(--display);margin:4px 0 0;text-wrap:balance}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font:500 12.5px/1 var(--body);padding:6px 10px;border-radius:999px;background:var(--bg);color:var(--muted)}
+.chip.risk{background:var(--risk-soft);color:var(--risk)}
+.chip.warn{background:var(--warn-soft);color:var(--warn)}
+.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.chip.ai{background:var(--accent-soft);color:var(--accent)}
+.group{border-top:1px solid var(--line);padding-top:12px}
+.group h3{font:600 13px/1.2 var(--body);margin:0 0 8px;display:flex;align-items:center;gap:8px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+.dot.risk{background:var(--risk)}.dot.warn{background:var(--warn)}.dot.ok{background:var(--ok)}.dot.ai{background:var(--accent)}
+dl{margin:0;display:grid;grid-template-columns:minmax(110px,38%) 1fr;gap:6px 14px}
+dt{color:var(--muted);font-size:13.5px}
+dt code{display:block;font:11px/1.3 var(--mono);opacity:.75}
+dd{margin:0;font-size:13.5px;overflow-wrap:anywhere;min-width:0}
+a{color:var(--accent)}
+.empty{color:var(--muted);font-size:14px;margin:0}
+.note{font-size:12.5px;color:var(--muted);margin:0}
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.steps li{display:grid;grid-template-columns:12px 1fr;gap:10px;font-size:13.5px}
+.steps li::before{content:"";width:10px;height:10px;border-radius:50%;border:2px solid var(--accent);margin-top:5px}
+.steps small{display:block;color:var(--muted);font-family:var(--mono);font-size:11.5px}
+
+.action{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-wrap:wrap;align-items:center;gap:14px 20px}
+.action .sum{flex:1 1 300px;min-width:0}
+.action .sum b{font:600 16px/1.3 var(--display)}
+.action .sum p{margin:3px 0 0;color:var(--muted);font-size:13.5px}
+.result{font-size:13.5px}
+footer{color:var(--muted);font-size:12.5px;display:flex;flex-wrap:wrap;gap:6px 18px;justify-content:space-between}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Révélateur photo</h1>
+      <p class="lede">Voyez ce que vos photos disent de vous, retirez la position GPS, l'appareil et l'auteur avant de publier, et lisez leur provenance (Content Credentials).</p>
+    </div>
+    <span class="local">Traitement local · aucun envoi</span>
+  </header>
+
+  <label class="drop" id="drop" for="file">
+    <svg width="44" height="44" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><circle cx="24" cy="24" r="19"/><path d="M24 5l7 16M43 24l-17 4M33 40l-10-13M9 37l13-11M7 15l16 7"/></svg>
+    <div class="txt">
+      <strong>Déposez une photo ici</strong>
+      <p>JPEG, PNG ou WebP. Vous pouvez aussi la coller (Ctrl+V). Le fichier reste sur votre appareil.</p>
+    </div>
+    <span class="btn ghost" aria-hidden="true">Choisir un fichier</span>
+    <input type="file" id="file" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp">
+  </label>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <section id="report" hidden>
+    <div style="display:flex;flex-direction:column;gap:18px">
+      <div class="filebar">
+        <img class="thumb" id="thumb" alt="Aperçu de la photo analysée">
+        <div class="fileinfo"><b id="fname"></b><div class="meta-line" id="fmeta"></div></div>
+      </div>
+
+      <div class="grid">
+        <article class="panel" id="privacy">
+          <div><div class="eyebrow">Vie privée</div><h2 id="privTitle"></h2></div>
+          <div class="chips" id="privChips"></div>
+          <div id="privBody" style="display:flex;flex-direction:column;gap:12px"></div>
+        </article>
+        <article class="panel" id="prov">
+          <div><div class="eyebrow">Provenance · Content Credentials (C2PA)</div><h2 id="provTitle"></h2></div>
+          <div class="chips" id="provChips"></div>
+          <div id="provBody" style="display:flex;flex-direction:column;gap:12px"></div>
+        </article>
+      </div>
+
+      <div class="action">
+        <div class="sum"><b id="actTitle"></b><p id="actText"></p></div>
+        <button class="btn" id="cleanBtn" type="button">Télécharger la version nettoyée</button>
+        <div class="result" id="result" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Révélateur photo · un outil SOSPC82</span>
+    <span>Les marqueurs d'origine (C2PA, type de source IPTC) sont toujours conservés.</span>
+  </footer>
+</div>
+
+<script>
+(() => {
+"use strict";
+const SAMPLE_B64 = "/9j/4AAQSkZJRgABAQAAAQABAAD/4QIMRXhpZgAATU0AKgAAAAgACAEPAAIAAAAJAAAAbgEQAAIAAAAGAAAAeAExAAIAAAAeAAAAfgEyAAIAAAAUAAAAnAE7AAIAAAAQAAAAsIKYAAIAAAAnAAAAwIdpAAQAAAABAAAA6IglAAQAAAABAAABfgAAAABGVUpJRklMTQAAWC1UMzAAQWRvYmUgTGlnaHRyb29tIDcuMiAoQW5kcm9pZCkAMjAyNjowOToxNCAxOTo0MjowOABDYW1pbGxlIEV4ZW1wbGUAQ2FtaWxsZSBFeGVtcGxlIC0gdG91cyBkcm9pdHMgcmVzZXJ2ZXMAAAAGgp0ADAAAAAEAAAE2iCcAAwAAAAEAyAAAkAMAAgAAABQAAAE+kgoADAAAAAEAAAFSpDEAAgAAAAkAAAFapDQAAgAAABkAAAFkAAAAAEAQAAAAAAAAMjAyNjowOToxNCAxOTo0MjowOABANwAAAAAAADdBQjAxMjM0AABYRjE4LTU1bW1GMi44LTQgUiBMTSBPSVMAAAAGAAEAAgAAAAJOAAAAAAIABQAAAAMAAAHMAAMAAgAAAAJFAAAAAAQABQAAAAMAAAHkAAUAAQAAAAEAAAAAAAYABQAAAAEAAAH8AAAAAAAAADAAAAABAAAANQAAAAEAAAA/AAAABQAAAAIAAAABAAAAFAAAAAEAAADzAAAACgAAAIAAAAAB/9sAQwAJBgcIBwYJCAcICgoJCw0WDw0MDA0bFBUQFiAdIiIgHR8fJCg0LCQmMScfHy09LTE1Nzo6OiMrP0Q/OEM0OTo3/9sAQwEKCgoNDA0aDw8aNyUfJTc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3/8AAEQgB4ALQAwEiAAIRAQMRAf/EAB8AAAEFAQEBAQEBAAAAAAAAAAABAgMEBQYHCAkKC//EALUQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+v/EAB8BAAMBAQEBAQEBAQEAAAAAAAABAgMEBQYHCAkKC//EALURAAIBAgQEAwQHBQQEAAECdwABAgMRBAUhMQYSQVEHYXETIjKBCBRCkaGxwQkjM1LwFWJy0QoWJDThJfEXGBkaJicoKSo1Njc4OTpDREVGR0hJSlNUVVZXWFlaY2RlZmdoaWpzdHV2d3h5eoKDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uLj5OXm5+jp6vLz9PX29/j5+v/aAAwDAQACEQMRAD8A9Fooorxj2AooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKAEooopgFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAlFFFMQUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFACUUUUwCiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooASikoqhC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFABRSUUwFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKACikopgLRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUAFFJRTAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWirVtZSTcn5F9T3rQisII+Su4/7VBEqiRjYPpRg+ldCqKowqgD0ApSqkYIBBoI9r5HOUVty2UEn8G0+q8VQudPeIFozvX070FKomU6KKSg0FopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKACikopiFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFopKKAFrSsLJWQSyjOegqvp9v582W+6vJ9626RlUnbRBRRRQYhRRRQAUUUUAUb6yV1aSMYcckDvWRXS1kapb7H81ejdfY0GtOfRlGikopmwtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAUUlFMBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSlHUUAbmmx+XbLnq3NWqbGoVFVegHFOqTkbu7hRRRQAUUUUAFFFFABUF3H5sDp3xxU9FAJ2OZop9wAs8ijoGIFR1R1C0UlFAxaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigBaKSigAopKKoQtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtFJRQAtA6ikooA6ZCCoIOQRTqqadL5tsnqvymrdZnK1ZhRRRQAUUUUAFFFFABRRUVzJ5UDv6DigDBuSDcSEHILGo6QnJorSx1C0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFAC0UlFACUUUUxBRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAX9KuRFL5bH5X6fWtnrXL1s6derJGI5Ww46E96mSM5x6o0KKKKgyCiiigAooooAKytXuQSIFPTlqs314kEZVWzIeAB2rDYliSxyT1NVFGkI9WJRRRVmoUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAlFFFMAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACjNFFAGjaam0Y2zguvr3FaUN1BN9yQE+h4Nc5RmpcSHBM6nNGa5pbiVRhZHA9AaDczEEGVyD70uQn2Z0EtxFCP3kgHt3rPutUyCtuMf7RrLznrRTUSlBIVmLEliST1NJRRVFhRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAlFJRTELRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUALRSUUAFFJRTAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAWikooAKKKKYBRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQAUUUUAFFFFABRRRQ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PUk803e394/nWnsvMz9r5HqG9P7w/Ojen94fnXl+9v7x/Oje394/nR7LzD2vkeh3upRwfLGQ7/XpWDc3YJLzyjPua5ncfU0Ek9TVxgokupc159UjUERAsfU9Koy31xL/AB7R6LxVWiqIcmxdx9TRk+ppKKYh6SOhyjsD7GrkOpzJxIA4/I1QopDTaN2HUIJON20+jVaDBgCCCD6VzFOV2QgqxBHcGixSmdNRWAl7cIMCQn681YTVZAfnRSPbiiw+ZGvRWYNWGRmLj61J/asH91/ypD5kX6KqDULYgHfj2IqdZ4mICyKSewNA7okopMj1paACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAvaffm3+STLR/yrbjkWVA6HKnvXLVZs7yS1Py8oeqms5QvqilKx0dFVob23mxtkAPoeKsVk1YsWikopALRUE13BD/rJAD6Dk1ENStSATJj2wafKwui5RVdLy3cZEq/icVIk0UhwkisfQGiwXJKKSk3r/eH50gOVooorqMgooooAKKKKACiiigAoopKAFoBI6GoTcwAEmVOPeoX1G3UZDFvYCgLo14dRuIhjduHo1S/2vP8A3U/I1zz6qgxsjY+uTioX1WQn5I1A9+aXKg5zp/7Xn/up+RqVNYHHmx4Hcg1xp1C5JPz49sVXeWR/vuzY9TRyIXtDuzr+ngZebafTGf5VQn8WwLjyLd39dxxXIUUvZxE6kjo5vFlyW/cwRquOjZNUn8RakzEicKD2Cjismiq5Y9ieeXckmmkmcvK7Ox6ljmo6KKokKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKWkooAekjoco7A+xp32mf/nq/wD31UVFAEv2mf8A56v/AN9Vat9Skjwso3r696oUUh3Z0UFzFOP3bDPoetTVzCkqcqSCO4q9BqcsYxIN4/Wixan3NmiswasMjMXH1qT+1YP7r/lSHzIv0VXivYJBxIB7NxU4OelAxaKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAooooAKKKKACiiigAqeC8ng4Rzt9DzUFFFrjNMaw+zBiG71zxVWe/uJgQXwp7LxVXOOtMeaNDh5FB9zUqKQXJ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";
+const $ = s => document.querySelector(s);
+const utf8 = new TextDecoder("utf-8");
+const MAX_DEPTH = 12;
+
+/* ---------- octets ---------- */
+const u16be=(b,o)=>(b[o]<<8)|b[o+1];
+const u32be=(b,o)=>b[o]*16777216+(b[o+1]<<16)+(b[o+2]<<8)+b[o+3];
+const u32le=(b,o)=>b[o]+(b[o+1]<<8)+(b[o+2]<<16)+b[o+3]*16777216;
+const ascii=(b,s,e)=>{let r="";for(let i=s;i<e&&i<b.length;i++)r+=String.fromCharCode(b[i]);return r;};
+const starts=(b,o,str)=>{for(let i=0;i<str.length;i++)if(b[o+i]!==str.charCodeAt(i))return false;return true;};
+const hex=a=>Array.from(a,x=>x.toString(16).padStart(2,"0")).join("");
+function concat(parts){let n=0;for(const p of parts)n+=p.length;const out=new Uint8Array(n);let o=0;for(const p of parts){out.set(p,o);o+=p.length;}return out;}
+const enc=s=>new TextEncoder().encode(s);
+const kb=n=>n<1024?n+" o":(n/1024).toLocaleString("fr-FR",{maximumFractionDigits:1})+" Ko";
+const CRC=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+function crc32(b){let c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=CRC[(c^b[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+function be32(n){return new Uint8Array([n>>>24&255,n>>>16&255,n>>>8&255,n&255]);}
+function le32(n){return new Uint8Array([n&255,n>>>8&255,n>>>16&255,n>>>24&255]);}
+
+/* ---------- format ---------- */
+function detect(b){
+  if(b[0]===0xFF&&b[1]===0xD8&&b[2]===0xFF)return"jpeg";
+  if(starts(b,0,"\x89PNG\r\n\x1a\n"))return"png";
+  if(starts(b,0,"RIFF")&&starts(b,8,"WEBP"))return"webp";
+  if(starts(b,4,"ftyp"))return"heic";
+  return null;
+}
+
+/* Chaque format est découpé en blocs {start,end,cat,keep}. Nettoyer = recoller les blocs gardés. */
+function blocksJPEG(b){
+  const bl=[{start:0,end:2,cat:"image",keep:true}];
+  let i=2, ended=false;
+  while(i+1<b.length){
+    if(b[i]!==0xFF){i++;continue;}
+    const m=b[i+1];
+    if(m===0xFF){i++;continue;}
+    if(m===0xD9){bl.push({start:i,end:i+2,cat:"image",keep:true});i+=2;ended=true;break;}
+    if((m>=0xD0&&m<=0xD7)||m===0x01){bl.push({start:i,end:i+2,cat:"image",keep:true});i+=2;continue;}
+    if(i+4>b.length)break;
+    const len=u16be(b,i+2), p=i+4; let end=Math.min(i+2+len,b.length);
+    let cat="image", keep=true;
+    if(m===0xDA){let j=end;while(j+1<b.length){if(b[j]===0xFF&&b[j+1]!==0&&!(b[j+1]>=0xD0&&b[j+1]<=0xD7))break;j++;}end=j+1<b.length?j:b.length;}
+    else if(m===0xE0){if(!starts(b,p,"JFIF\0")){cat="thumb";keep=false;}}
+    else if(m===0xE1){keep=false;cat=starts(b,p,"Exif\0")?"exif":starts(b,p,"http://ns.adobe.com/xap/1.0/\0")?"xmp":starts(b,p,"http://ns.adobe.com/xmp/extension/")?"xmpext":"other";}
+    else if(m===0xE2){if(starts(b,p,"ICC_PROFILE\0"))cat="color";else{keep=false;cat=starts(b,p,"MPF\0")?"thumb":"other";}}
+    else if(m===0xEB){if(starts(b,p,"JP")){cat="c2pa";}else{keep=false;cat="other";}}
+    else if(m===0xED){keep=false;cat="iptc";}
+    else if(m===0xEE){cat="color";}
+    else if(m===0xFE){keep=false;cat="comment";}
+    else if(m>=0xE0&&m<=0xEF){keep=false;cat="other";}
+    bl.push({start:i,end,cat,keep,m,p});
+    i=end;
+  }
+  if(ended&&i<b.length)bl.push({start:i,end:b.length,cat:"trailing",keep:false});
+  return bl;
+}
+const PNG_KEEP=new Set(["IHDR","PLTE","IDAT","IEND","tRNS","gAMA","cHRM","sRGB","iCCP","sBIT","pHYs","bKGD","hIST","sPLT","acTL","fcTL","fdAT","cICP","mDCv","cLLi","caBX"]);
+function blocksPNG(b){
+  const bl=[{start:0,end:8,cat:"image",keep:true}]; let i=8;
+  while(i+12<=b.length){
+    const len=u32be(b,i), type=ascii(b,i+4,i+8), end=Math.min(i+12+len,b.length);
+    let cat="image";
+    if(type==="caBX")cat="c2pa";else if(type==="iCCP"||type==="sRGB"||type==="cICP")cat="color";
+    else if(type==="eXIf")cat="exif";else if(type==="tIME")cat="time";
+    else if(type==="iTXt"&&starts(b,i+8,"XML:com.adobe.xmp\0"))cat="xmp";
+    else if(type==="tEXt"||type==="zTXt"||type==="iTXt")cat="text";
+    else if(!PNG_KEEP.has(type))cat="other";
+    bl.push({start:i,end,cat,keep:PNG_KEEP.has(type),type,d:i+8,dEnd:i+8+len});
+    i=end; if(type==="IEND")break;
+  }
+  if(i<b.length)bl.push({start:i,end:b.length,cat:"trailing",keep:false});
+  return bl;
+}
+const WEBP_KEEP=new Set(["VP8 ","VP8L","VP8X","ALPH","ANIM","ANMF","ICCP","C2PA"]);
+function blocksWEBP(b){
+  const bl=[{start:0,end:12,cat:"image",keep:true}]; let i=12;
+  while(i+8<=b.length){
+    const type=ascii(b,i,i+4), size=u32le(b,i+4), end=Math.min(i+8+size+(size&1),b.length);
+    let cat=type==="EXIF"?"exif":type==="XMP "?"xmp":type==="C2PA"?"c2pa":type==="ICCP"?"color":WEBP_KEEP.has(type)?"image":"other";
+    bl.push({start:i,end,cat,keep:WEBP_KEEP.has(type),type,d:i+8,dEnd:i+8+size});
+    i=end;
+  }
+  return bl;
+}
+
+/* ---------- EXIF (TIFF) ---------- */
+const TS={1:1,2:1,3:2,4:4,5:8,6:1,7:1,8:2,9:4,10:8,11:4,12:8};
+function parseTIFF(b,base){
+  const out={tags:[],thumb:false};
+  if(base+8>b.length)return out;
+  const le=b[base]===0x49;
+  const dv=new DataView(b.buffer,b.byteOffset,b.byteLength);
+  const ok=o=>base+o>=0&&base+o<b.length;
+  const r16=o=>dv.getUint16(base+o,le), r32=o=>dv.getUint32(base+o,le), s32=o=>dv.getInt32(base+o,le);
+  const seen=new Set();
+  function ifd(off,name,depth){
+    if(!off||seen.has(off)||depth>4||!ok(off+1))return 0; seen.add(off);
+    const n=r16(off); if(n>1000)return 0;
+    for(let k=0;k<n;k++){
+      const e=off+2+k*12; if(!ok(e+11))break;
+      const id=r16(e),type=r16(e+2),count=r32(e+4),size=(TS[type]||1)*count;
+      if(id===0x8769||id===0x8825||id===0xA005){ifd(r32(e+8),id===0x8825?"GPS":id===0x8769?"Exif":"Interop",depth+1);continue;}
+      const vo=size<=4?e+8:r32(e+8);
+      if(!ok(vo)||!ok(vo+Math.max(0,Math.min(size,65536)-1)))continue;
+      let val; const lim=Math.min(count,32);
+      if(type===2)val=utf8.decode(b.subarray(base+vo,base+vo+count)).replace(/\0+$/,"").trim();
+      else if(type===3){val=[];for(let j=0;j<lim;j++)val.push(r16(vo+j*2));}
+      else if(type===4){val=[];for(let j=0;j<lim;j++)val.push(r32(vo+j*4));}
+      else if(type===9){val=[];for(let j=0;j<lim;j++)val.push(s32(vo+j*4));}
+      else if(type===5||type===10){val=[];for(let j=0;j<lim;j++){const nu=type===5?r32(vo+j*8):s32(vo+j*8),de=type===5?r32(vo+j*8+4):s32(vo+j*8+4);val.push(de?nu/de:0);}}
+      else if(type===1||type===7)val=count<=8?Array.from(b.subarray(base+vo,base+vo+count)):{bytes:count};
+      else val={bytes:size};
+      out.tags.push({ifd:name,id,type,val,size});
+    }
+    return ok(off+2+n*12+3)?r32(off+2+n*12):0;
+  }
+  if(!(b[base]===0x49&&b[base+1]===0x49)&&!(b[base]===0x4D&&b[base+1]===0x4D))return out;
+  const next=ifd(r32(4),"IFD0",0);
+  if(next){out.thumb=true;ifd(next,"IFD1",1);}
+  return out;
+}
+
+/* ---------- XMP ---------- */
+function xmpGet(x,prop){
+  let m=x.match(new RegExp(prop.replace(":","\\:")+'\\s*=\\s*"([^"]*)"'));
+  if(m)return m[1];
+  m=x.match(new RegExp("<"+prop+"[^>]*>([\\s\\S]*?)</"+prop+">"));
+  if(!m)return null;
+  const lis=[...m[1].matchAll(/<rdf:li[^>]*>([\s\S]*?)<\/rdf:li>/g)].map(a=>a[1].trim());
+  return (lis.length?lis.join(", "):m[1].replace(/<[^>]+>/g,"")).trim()||null;
+}
+
+/* ---------- CBOR ---------- */
+const BREAK=Symbol("break");
+function cbor(b){
+  let i=0; const dv=new DataView(b.buffer,b.byteOffset,b.byteLength); let depth=0;
+  const len=ai=>{if(ai<24)return ai;if(ai===24)return b[i++];if(ai===25){const v=dv.getUint16(i);i+=2;return v;}if(ai===26){const v=dv.getUint32(i);i+=4;return v;}if(ai===27){const v=Number(dv.getBigUint64(i));i+=8;return v;}if(ai===31)return -1;throw new Error("cbor");};
+  function item(){
+    if(i>=b.length)throw new Error("cbor eof");
+    if(++depth>64)throw new Error("cbor depth");
+    try{
+      const ib=b[i++],mt=ib>>5,ai=ib&31;
+      if(mt===7){
+        if(ai===20)return false;if(ai===21)return true;if(ai===22||ai===23)return null;
+        if(ai===25){const h=dv.getUint16(i);i+=2;const s=h&0x8000?-1:1,e=(h>>10)&31,f=h&1023;return s*(e===0?f*2**-24:e===31?(f?NaN:Infinity):(1+f/1024)*2**(e-15));}
+        if(ai===26){const v=dv.getFloat32(i);i+=4;return v;}
+        if(ai===27){const v=dv.getFloat64(i);i+=8;return v;}
+        if(ai===31)return BREAK; return ai;
+      }
+      const n=len(ai);
+      if(mt===0)return n; if(mt===1)return -1-n;
+      if(mt===2||mt===3){
+        let bytes;
+        if(n<0){const parts=[];for(;;){const c=item();if(c===BREAK)break;parts.push(typeof c==="string"?enc(c):c);}bytes=concat(parts);}
+        else{if(i+n>b.length)throw new Error("cbor len");bytes=b.subarray(i,i+n);i+=n;}
+        return mt===3?utf8.decode(bytes):bytes;
+      }
+      if(mt===4){const a=[];if(n<0){for(;;){const v=item();if(v===BREAK)break;a.push(v);}}else{if(n>100000)throw new Error("cbor");for(let k=0;k<n;k++)a.push(item());}return a;}
+      if(mt===5){const o={};const put=()=>{const k=item();if(k===BREAK)return false;o[typeof k==="object"?JSON.stringify(k):String(k)]=item();return true;};if(n<0){while(put());}else{if(n>100000)throw new Error("cbor");for(let k=0;k<n;k++)put();}return o;}
+      if(mt===6)return {tag:n,value:item()};
+    }finally{depth--;}
+  }
+  return item();
+}
+
+/* ---------- JUMBF / C2PA ---------- */
+function jumbf(b,s,e,out,depth){
+  let i=s;
+  while(i+8<=e&&depth<MAX_DEPTH){
+    let len=u32be(b,i),hdr=8; const type=ascii(b,i+4,i+8);
+    if(len===1){len=u32be(b,i+8)*4294967296+u32be(b,i+12);hdr=16;} else if(len===0)len=e-i;
+    if(len<hdr)break;
+    const end=Math.min(i+len,e);
+    if(type==="jumb"){const box={type,label:null,children:[]};jumbf(b,i+hdr,end,box.children,depth+1);const d=box.children.find(c=>c.type==="jumd");if(d)box.label=d.label;out.push(box);}
+    else if(type==="jumd"){const p=i+hdr;const t=b[p+16];let label=null;if(t&2){let q=p+17;while(q<end&&b[q]!==0)q++;label=utf8.decode(b.subarray(p+17,q));}out.push({type,label});}
+    else out.push({type,data:b.subarray(i+hdr,end)});
+    i=end;
+  }
+  return out;
+}
+const kidsOf=box=>(box&&box.children||[]).filter(c=>c.type==="jumb");
+const payloadOf=box=>{const c=(box.children||[]).find(c=>c.type==="cbor"||c.type==="json");if(!c)return null;try{return c.type==="cbor"?cbor(c.data):JSON.parse(utf8.decode(c.data));}catch{return null;}};
+
+function der(b,i){const tag=b[i];let l=b[i+1],h=2;if(l&0x80){const n=l&0x7f;l=0;for(let k=0;k<n;k++)l=l*256+b[i+2+k];h=2+n;}return{tag,start:i+h,end:i+h+l};}
+function derKids(b,n){const out=[];let i=n.start;while(i<n.end&&out.length<64){const c=der(b,i);out.push(c);i=c.end;}return out;}
+function derName(b,n){const r={};for(const set of derKids(b,n))for(const seq of derKids(b,set)){const[oid,val]=derKids(b,seq);if(!oid||!val)continue;const o=hex(b.subarray(oid.start,oid.end));const v=utf8.decode(b.subarray(val.start,val.end));if(o==="550403")r.CN=v;else if(o==="55040a")r.O=v;else if(o==="55040b")r.OU=v;else if(o==="550406")r.C=v;}return r;}
+function derTime(b,n){const s=ascii(b,n.start,n.end);let y,r;if(n.tag===0x17){y=+s.slice(0,2);y=y<50?2000+y:1900+y;r=s.slice(2);}else{y=+s.slice(0,4);r=s.slice(4);}return new Date(Date.UTC(y,+r.slice(0,2)-1,+r.slice(2,4),+r.slice(4,6)||0,+r.slice(6,8)||0));}
+function parseCert(b){try{const tbs=derKids(b,der(b,0))[0];let ch=derKids(b,tbs);if(ch[0].tag===0xA0)ch=ch.slice(1);const v=derKids(b,ch[3]);return{issuer:derName(b,ch[2]),subject:derName(b,ch[4]),from:derTime(b,v[0]),to:derTime(b,v[1])};}catch{return null;}}
+function tstTime(tok){if(!(tok instanceof Uint8Array))return null;const lim=Date.now()+864e5;let best=null;for(let i=0;i+17<tok.length;i++){if(tok[i]===0x18&&tok[i+1]>=15&&tok[i+1]<=19){const s=ascii(tok,i+2,i+2+tok[i+1]);if(/^\d{14}/.test(s)){const d=new Date(Date.UTC(+s.slice(0,4),+s.slice(4,6)-1,+s.slice(6,8),+s.slice(8,10),+s.slice(10,12),+s.slice(12,14)));if(d<=lim&&(!best||d>best))best=d;}}}return best;}
+
+function parseC2PA(raw){
+  const top=jumbf(raw,0,raw.length,[],0).find(x=>x.type==="jumb");
+  if(!top)return{error:"Bloc C2PA illisible"};
+  const manifests=kidsOf(top);
+  const parsed=manifests.map(m=>{
+    const kids=kidsOf(m);
+    const claimBox=kids.find(k=>(k.label||"").startsWith("c2pa.claim"));
+    const claim=claimBox?payloadOf(claimBox):null;
+    const asr=kids.find(k=>k.label==="c2pa.assertions");
+    const assertions=kidsOf(asr).map(a=>({label:a.label,data:/^c2pa\.(actions|ingredient)|^stds\.|^cawg\./.test(a.label||"")?payloadOf(a):null}));
+    const sigBox=kids.find(k=>k.label==="c2pa.signature");
+    let signer=null,signedAt=null;
+    if(sigBox){
+      try{
+        const c=sigBox.children.find(x=>x.type==="cbor");let s=cbor(c.data);if(s&&s.tag===18)s=s.value;
+        const prot=s[0]&&s[0].length?cbor(s[0]):{};const unp=s[1]||{};
+        let x5=prot["33"]||unp["33"];const certs=x5?(Array.isArray(x5)?x5:[x5]):[];
+        signer=certs.length?parseCert(certs[0]):null;
+        const st=unp.sigTst||unp.sigTst2;const tok=st&&st.tstTokens&&st.tstTokens[0];signedAt=tstTime(tok&&tok.val);
+      }catch{}
+    }
+    return{label:m.label,claim,assertions,signer,signedAt};
+  });
+  return{manifests:parsed,active:parsed[parsed.length-1]};
+}
+function jpegC2PA(b,bl){
+  const parts=[];let first=true;
+  for(const x of bl.filter(x=>x.cat==="c2pa")){const s=x.p+8;if(first){parts.push(b.subarray(s,x.end));first=false;}else parts.push(b.subarray(s+8,x.end));}
+  return parts.length?concat(parts):null;
+}
+
+/* ---------- libellés ---------- */
+const TAGS={0x010E:"Description",0x010F:"Marque",0x0110:"Modèle",0x0112:"Orientation",0x0131:"Logiciel",0x0132:"Date de modification",0x013B:"Auteur",0x8298:"Copyright",0x9003:"Date de prise de vue",0x9004:"Date de numérisation",0xA430:"Propriétaire de l'appareil",0xA431:"Numéro de série du boîtier",0xA432:"Objectif (plage)",0xA433:"Marque de l'objectif",0xA434:"Objectif",0xA435:"Numéro de série de l'objectif",0xA420:"Identifiant unique de l'image",0x927C:"Données constructeur (MakerNote)",0x9286:"Commentaire utilisateur",0x829A:"Exposition",0x829D:"Ouverture",0x8827:"ISO",0x920A:"Focale",0x9010:"Fuseau horaire"};
+const SRC={trainedAlgorithmicMedia:"Généré par une IA",compositeWithTrainedAlgorithmicMedia:"Composite incluant des éléments générés par IA",algorithmicMedia:"Généré par algorithme",algorithmicallyEnhanced:"Amélioré par algorithme",digitalCapture:"Capture d'un appareil photo",negativeFilm:"Scan de négatif",positiveFilm:"Scan de diapositive",print:"Scan d'un tirage",minorHumanEdits:"Retouches mineures",humanEdits:"Retouches humaines",compositeCapture:"Composite de captures",compositeSynthetic:"Composite synthétique",composite:"Composite",dataDrivenMedia:"Média produit à partir de données",digitalCreation:"Création numérique",screenCapture:"Capture d'écran",virtualRecording:"Enregistrement virtuel"};
+const AI_SRC=/trainedAlgorithmicMedia|compositeWithTrainedAlgorithmicMedia|algorithmicMedia/;
+const ACT={"c2pa.created":"Création","c2pa.opened":"Ouverture","c2pa.edited":"Modification","c2pa.converted":"Conversion de format","c2pa.resized":"Redimensionnement","c2pa.cropped":"Recadrage","c2pa.color_adjustments":"Réglages de couleur","c2pa.filtered":"Filtre","c2pa.placed":"Insertion d'un élément","c2pa.published":"Publication","c2pa.drawing":"Dessin","c2pa.orientation":"Rotation","c2pa.removed":"Suppression d'éléments","c2pa.transcoded":"Réencodage","c2pa.repackaged":"Réempaquetage","c2pa.watermarked":"Ajout d'un filigrane","c2pa.redacted":"Masquage","c2pa.watermarked.bound":"Ajout d'un filigrane invisible","c2pa.watermarked.unbound":"Ajout d'un filigrane invisible"};
+const srcLabel=u=>{const k=String(u||"").split("/").pop();return SRC[k]||k||null;};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmtDate=d=>d&&!isNaN(d)?d.toLocaleString("fr-FR",{dateStyle:"long",timeStyle:"short"}):null;
+const exifDate=s=>{const m=/^(\d{4}):(\d\d):(\d\d) (\d\d):(\d\d)/.exec(s||"");return m?`${+m[3]} ${["janv.","févr.","mars","avr.","mai","juin","juil.","août","sept.","oct.","nov.","déc."][+m[2]-1]} ${m[1]} à ${m[4]}:${m[5]}`:s;};
+
+/* ---------- analyse ---------- */
+function inspect(bytes){
+  const format=detect(bytes);
+  if(format==="heic")throw new Error("Les fichiers HEIC (iPhone) ne sont pas encore pris en charge. Exportez la photo en JPEG puis réessayez.");
+  if(!format)throw new Error("Ce fichier n'est pas une image JPEG, PNG ou WebP.");
+  const blocks=format==="jpeg"?blocksJPEG(bytes):format==="png"?blocksPNG(bytes):blocksWEBP(bytes);
+  const r={format,size:bytes.length,blocks,exif:{tags:[],thumb:false},xmp:null,texts:[],c2pa:null,aiHint:null,dst:null};
+  for(const bl of blocks){
+    try{
+      if(bl.cat==="exif"){
+        let base=format==="jpeg"?bl.p+6:bl.d; if(format==="webp"&&starts(bytes,base,"Exif\0\0"))base+=6;
+        const view=bytes.subarray(0,format==="jpeg"?bl.end:bl.dEnd); const t=parseTIFF(view,base);
+        r.exif.tags.push(...t.tags); r.exif.thumb=r.exif.thumb||t.thumb;
+      }else if(bl.cat==="xmp"){
+        const s=format==="jpeg"?bl.p+29:format==="png"?bl.d:bl.d;
+        let x=utf8.decode(bytes.subarray(s,format==="jpeg"?bl.end:bl.dEnd)); r.xmp=(r.xmp||"")+x;
+      }else if(bl.cat==="text"&&format==="png"){
+        const d=bytes.subarray(bl.d,bl.dEnd);const z=d.indexOf(0);const key=ascii(d,0,z);
+        let val=bl.type==="tEXt"?ascii(d,z+1,d.length):bl.type==="iTXt"&&d[z+1]===0?utf8.decode(d.subarray(d.indexOf(0,d.indexOf(0,z+3)+1)+1)):"(texte compressé)";
+        r.texts.push([key,val]);
+      }else if(bl.cat==="comment"){r.texts.push(["Commentaire JPEG",utf8.decode(bytes.subarray(bl.p,bl.end))]);}
+    }catch{}
+  }
+  let raw=null;
+  if(format==="jpeg")raw=jpegC2PA(bytes,blocks);
+  else{const c=blocks.find(x=>x.cat==="c2pa");if(c)raw=bytes.subarray(c.d,c.dEnd);}
+  if(raw){try{r.c2pa=parseC2PA(raw);}catch(e){r.c2pa={error:"Bloc C2PA présent mais illisible"};}r.c2paBytes=raw.length;}
+  if(r.xmp){const d=xmpGet(r.xmp,"Iptc4xmpExt:DigitalSourceType");if(d)r.dst=d;}
+  const sd=r.texts.find(([k])=>/^(parameters|prompt|workflow|Dream|sd-metadata|invokeai_metadata)$/i.test(k));
+  if(r.dst&&AI_SRC.test(r.dst))r.aiHint="xmp"; else if(sd){r.aiHint="text";r.dst=r.dst||"http://cv.iptc.org/newscodes/digitalsourcetype/trainedAlgorithmicMedia";}
+  return r;
+}
+
+/* ---------- nettoyage ---------- */
+function minimalXMP(dst){
+  return `<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:Iptc4xmpExt="http://iptc.org/std/Iptc4xmpExt/2008-02-29/" Iptc4xmpExt:DigitalSourceType="${esc(dst)}"/></rdf:RDF></x:xmpmeta><?xpacket end="w"?>`;
+}
+function clean(bytes,r){
+  const keepDST=r.dst&&(AI_SRC.test(r.dst)||r.aiHint)?r.dst:null;
+  const parts=[];
+  const orient=(r.exif.tags.find(t=>t.ifd==="IFD0"&&t.id===0x0112)||{}).val; const o=Array.isArray(orient)?orient[0]:1;
+  let inserted=false;
+  for(const bl of r.blocks){
+    if(bl.keep)parts.push(bytes.subarray(bl.start,bl.end));
+    const afterHead=r.format==="jpeg"?(bl.start===0&&!(r.blocks[1]&&r.blocks[1].m===0xE0))||bl.m===0xE0:r.format==="png"?bl.type==="IHDR":bl.start===0;
+    if(!inserted&&afterHead){
+      inserted=true;
+      if(r.format==="jpeg"){
+        if(o&&o!==1){const t=new Uint8Array([0x4D,0x4D,0,0x2A,0,0,0,8,0,1,1,0x12,0,3,0,0,0,1,0,o,0,0,0,0,0,0]);const pl=concat([enc("Exif\0\0"),t]);parts.push(new Uint8Array([0xFF,0xE1,(pl.length+2)>>8,(pl.length+2)&255]),pl);}
+        if(keepDST){const pl=concat([enc("http://ns.adobe.com/xap/1.0/\0"),enc(minimalXMP(keepDST))]);parts.push(new Uint8Array([0xFF,0xE1,(pl.length+2)>>8,(pl.length+2)&255]),pl);}
+      }else if(r.format==="png"&&keepDST){
+        const data=concat([enc("XML:com.adobe.xmp\0\0\0\0\0"),enc(minimalXMP(keepDST))]);const tc=concat([enc("iTXt"),data]);
+        parts.push(be32(data.length),tc,be32(crc32(tc)));
+      }
+    }
+  }
+  let out=concat(parts);
+  if(r.format==="webp"){
+    const vp8x=r.blocks.find(x=>x.type==="VP8X");
+    if(keepDST&&vp8x){const x=enc(minimalXMP(keepDST));const pad=x.length&1?new Uint8Array(1):new Uint8Array(0);out=concat([out,enc("XMP "),le32(x.length),x,pad]);}
+    let i=12;while(i+8<=out.length){const t=ascii(out,i,i+4),s=u32le(out,i+4);if(t==="VP8X"){out[i+8]&=~0x0C;if(keepDST)out[i+8]|=0x04;break;}i+=8+s+(s&1);}
+    out.set(le32(out.length-8),4);
+  }
+  return {out,keptDST:!!keepDST,orientation:o&&o!==1};
+}
+
+/* ---------- rendu ---------- */
+const CAT={exif:"EXIF",xmp:"XMP",xmpext:"XMP étendu",iptc:"IPTC / Photoshop",comment:"Commentaire",text:"Textes intégrés",time:"Date de modification",thumb:"Miniatures et images annexes",other:"Autres blocs privés",trailing:"Données après l'image"};
+function removable(r){const m=new Map();for(const b of r.blocks)if(!b.keep){const k=CAT[b.cat]||b.cat;m.set(k,(m.get(k)||0)+(b.end-b.start));}return [...m];}
+function dl(rows){return `<dl>${rows.map(([k,v,t])=>`<dt>${esc(k)}${t?`<code>${t}</code>`:""}</dt><dd>${v}</dd>`).join("")}</dl>`;}
+function group(title,sev,rows){return rows.length?`<div class="group"><h3><span class="dot ${sev}"></span>${esc(title)}</h3>${dl(rows)}</div>`:"";}
+const tagHex=id=>"0x"+id.toString(16).toUpperCase().padStart(4,"0");
+
+function renderPrivacy(r){
+  const T=(ifd,id)=>r.exif.tags.find(t=>(!ifd||t.ifd===ifd)&&t.id===id&&t.ifd!=="IFD1");
+  const str=t=>t?(typeof t.val==="string"?t.val:Array.isArray(t.val)?t.val.map(v=>Number.isInteger(v)?v:+v.toFixed(2)).join(" "):`${t.val.bytes} octets`):null;
+  const chips=[],body=[];
+  // Localisation
+  const lat=T("GPS",2),lon=T("GPS",4),latR=T("GPS",1),lonR=T("GPS",3),alt=T("GPS",6);
+  const loc=[];
+  if(lat&&lon&&Array.isArray(lat.val)&&lat.val.length>=3){
+    const dd=a=>a[0]+a[1]/60+a[2]/3600; let la=dd(lat.val)*(/S/i.test(str(latR)||"")?-1:1), lo=dd(lon.val)*(/W/i.test(str(lonR)||"")?-1:1);
+    if(la||lo){const url=`https://www.openstreetmap.org/?mlat=${la.toFixed(6)}&mlon=${lo.toFixed(6)}#map=17/${la.toFixed(5)}/${lo.toFixed(5)}`;
+      loc.push(["Coordonnées",`<span class="meta-line">${la.toFixed(6)}, ${lo.toFixed(6)}</span><br><a href="${url}" target="_blank" rel="noopener">Voir l'endroit sur la carte</a>`,"0x8825 GPS"]);
+      if(alt)loc.push(["Altitude",`${Math.round(alt.val[0])} m`,"GPS 0x0006"]);
+      chips.push(["risk","Position exacte"]);}
+  }
+  const xl=r.xmp&&xmpGet(r.xmp,"exif:GPSLatitude"),xo=r.xmp&&xmpGet(r.xmp,"exif:GPSLongitude");
+  if(xl&&xo){loc.push(["Position (XMP)",esc(xl+" · "+xo),"exif:GPS"]);if(!chips.length)chips.push(["risk","Position exacte"]);}
+  body.push(group("Localisation","risk",loc));
+  // Appareil
+  const dev=[];
+  for(const id of [0x010F,0x0110,0xA434,0xA433]){const t=T(null,id);if(t&&str(t))dev.push([TAGS[id],esc(str(t)),tagHex(id)]);}
+  const ids=[];
+  for(const id of [0xA431,0xA435,0xA430,0xA420]){const t=T(null,id);if(t&&str(t))ids.push([TAGS[id],esc(str(t)),tagHex(id)]);}
+  const mk=T(null,0x927C);if(mk)ids.push([TAGS[0x927C],`${kb(mk.size)} illisibles par l'utilisateur, souvent un numéro de série`,"0x927C"]);
+  if(ids.length)chips.push(["warn","Identifiant d'appareil"]);
+  body.push(group("Appareil","warn",dev.concat(ids)));
+  // Auteur
+  const who=[];
+  for(const id of [0x013B,0x8298,0x010E]){const t=T(null,id);if(t&&str(t))who.push([TAGS[id],esc(str(t)),tagHex(id)]);}
+  if(r.xmp){for(const [p,l] of [["dc:creator","Créateur"],["dc:rights","Droits"],["photoshop:Credit","Crédit"],["photoshop:AuthorsPosition","Fonction de l'auteur"]]){const v=xmpGet(r.xmp,p);if(v)who.push([l,esc(v),p]);}}
+  if(who.length)chips.push(["warn","Nom ou auteur"]);
+  body.push(group("Auteur et droits","warn",who));
+  // Date et logiciel
+  const when=[];
+  for(const id of [0x9003,0x0132,0x9010]){const t=T(null,id);if(t&&str(t))when.push([TAGS[id],esc(exifDate(str(t))),tagHex(id)]);}
+  const sw=T(null,0x0131);if(sw&&str(sw))when.push([TAGS[0x0131],esc(str(sw)),"0x0131"]);
+  if(r.xmp){const ct=xmpGet(r.xmp,"xmp:CreatorTool");if(ct)when.push(["Logiciel (XMP)",esc(ct),"xmp:CreatorTool"]);const cd=xmpGet(r.xmp,"xmp:CreateDate");if(cd)when.push(["Création (XMP)",esc(cd),"xmp:CreateDate"]);}
+  if(when.length)chips.push(["","Date et logiciel"]);
+  body.push(group("Date et logiciel","",when));
+  // Prise de vue
+  const shot=[];const ex=T(null,0x829A),fn=T(null,0x829D),iso=T(null,0x8827),fl=T(null,0x920A);
+  if(ex&&ex.val[0])shot.push(["Exposition",ex.val[0]<1?`1/${Math.round(1/ex.val[0])} s`:`${ex.val[0]} s`,"0x829A"]);
+  if(fn&&fn.val[0])shot.push(["Ouverture",`f/${+fn.val[0].toFixed(1)}`,"0x829D"]);
+  if(iso)shot.push(["ISO",esc(str(iso)),"0x8827"]);
+  if(fl&&fl.val[0])shot.push(["Focale",`${+fl.val[0].toFixed(1)} mm`,"0x920A"]);
+  body.push(group("Réglages de prise de vue","",shot));
+  // Textes
+  if(r.texts.length){const t=r.texts.slice(0,6).map(([k,v])=>[k,esc(v.length>220?v.slice(0,220)+"…":v),null]);body.push(group("Textes intégrés au fichier","warn",t));chips.push(["warn","Textes intégrés"]);}
+  if(r.exif.thumb)chips.push(["","Miniature intégrée"]);
+  const tr=r.blocks.find(b=>b.cat==="trailing");if(tr)chips.push(["warn",`Données cachées après l'image (${kb(tr.end-tr.start)})`]);
+  const total=r.exif.tags.length;
+  const html=body.join("");
+  $("#privTitle").textContent=chips.some(c=>c[0]==="risk")?"Cette photo révèle où elle a été prise":html?"Cette photo contient des informations personnelles":"Rien de personnel détecté";
+  $("#privChips").innerHTML=chips.map(([c,t])=>`<span class="chip ${c}">${esc(t)}</span>`).join("");
+  $("#privBody").innerHTML=html||`<p class="empty">Aucune donnée EXIF, XMP ou texte n'a été trouvée dans ce fichier.</p>`;
+  if(total)$("#privBody").insertAdjacentHTML("beforeend",`<p class="note">${total} champ${total>1?"s":""} EXIF au total${r.xmp?", plus un bloc XMP de "+kb(enc(r.xmp).length):""}.</p>`);
+}
+
+function renderProv(r){
+  const c=r.c2pa, chips=[], body=[];
+  if(!c){
+    $("#provTitle").textContent="Aucun Content Credentials";
+    if(r.aiHint){chips.push(["ai",r.aiHint==="xmp"?"Marqué IA (IPTC)":"Paramètres de génération IA"]);}
+    $("#provChips").innerHTML=chips.map(([k,t])=>`<span class="chip ${k}">${esc(t)}</span>`).join("");
+    const extra=r.dst?dl([["Type de source (IPTC)",esc(srcLabel(r.dst)),"DigitalSourceType"]]):"";
+    $("#provBody").innerHTML=`${extra}<p class="empty">Le fichier ne porte pas de signature de provenance. Son origine ne peut pas être établie à partir du fichier seul. L'absence de Content Credentials ne prouve pas que la photo est authentique&nbsp;: la plupart des sites et messageries les retirent.</p>`;
+    return;
+  }
+  if(c.error){$("#provTitle").textContent="Content Credentials présents";$("#provChips").innerHTML=`<span class="chip warn">${esc(c.error)}</span>`;$("#provBody").innerHTML=`<p class="note">Faites vérifier le fichier sur <a href="https://contentcredentials.org/verify" target="_blank" rel="noopener">contentcredentials.org/verify</a>.</p>`;return;}
+  const a=c.active||{}, cl=a.claim||{};
+  const info=cl.claim_generator_info?(Array.isArray(cl.claim_generator_info)?cl.claim_generator_info:[cl.claim_generator_info]):[];
+  const gen=info.map(g=>[g.name,g.version].filter(Boolean).join(" ")).filter(Boolean).join(", ")||cl.claim_generator||null;
+  const actions=[];let ai=false;const ingredients=[];
+  for(const m of c.manifests)for(const as of m.assertions){
+    if(/^c2pa\.actions/.test(as.label||"")&&as.data&&Array.isArray(as.data.actions))for(const x of as.data.actions){const d=x.digitalSourceType||(x.parameters&&x.parameters.digitalSourceType);if(d&&AI_SRC.test(d))ai=true;if(m===a)actions.push(x);}
+    if(m===a&&/^c2pa\.ingredient/.test(as.label||"")&&as.data)ingredients.push(as.data["dc:title"]||as.data.title||"Fichier source");
+  }
+  if(ai)chips.push(["ai","Image générée par IA"]);
+  chips.push(["ok","Signature présente"]);
+  if(c.manifests.length>1)chips.push(["",`${c.manifests.length} étapes d'historique`]);
+  $("#provTitle").textContent=ai?"Cette image déclare avoir été générée par une IA":"Cette image porte une signature de provenance";
+  $("#provChips").innerHTML=chips.map(([k,t])=>`<span class="chip ${k}">${esc(t)}</span>`).join("");
+  const s=a.signer;
+  const rows=[];
+  if(gen)rows.push(["Produit avec",esc(gen),"claim_generator"]);
+  if(s&&(s.subject.O||s.subject.CN))rows.push(["Signé par",esc([s.subject.O,s.subject.CN].filter((v,i,arr)=>v&&arr.indexOf(v)===i).join(" · ")),"x5chain"]);
+  if(s&&(s.issuer.O||s.issuer.CN))rows.push(["Autorité de certification",esc(s.issuer.O||s.issuer.CN),null]);
+  if(a.signedAt)rows.push(["Signé le",esc(fmtDate(a.signedAt)),"sigTst"]);
+  else if(s&&s.from)rows.push(["Certificat valable",`du ${esc(s.from.toLocaleDateString("fr-FR"))} au ${esc(s.to.toLocaleDateString("fr-FR"))}`,null]);
+  if(cl["dc:title"])rows.push(["Titre déclaré",esc(cl["dc:title"]),"dc:title"]);
+  if(ingredients.length)rows.push(["Fichiers sources",esc(ingredients.join(", ")),"c2pa.ingredient"]);
+  body.push(dl(rows));
+  if(actions.length){
+    body.push(`<div class="group"><h3><span class="dot ai"></span>Historique déclaré</h3><ol class="steps">${actions.slice(0,8).map(x=>{const d=x.digitalSourceType||(x.parameters&&x.parameters.digitalSourceType);const ag=typeof x.softwareAgent==="string"?x.softwareAgent:x.softwareAgent&&x.softwareAgent.name;return `<li><span>${esc(ACT[x.action]||x.action)}${d?` · ${esc(srcLabel(d))}`:""}<small>${esc([x.action,ag].filter(Boolean).join(" · "))}</small></span></li>`;}).join("")}</ol></div>`);
+  }
+  body.push(`<p class="note">Lecture du manifeste sans vérification cryptographique de la signature. Pour une vérification officielle, déposez le fichier d'origine sur <a href="https://contentcredentials.org/verify" target="_blank" rel="noopener">contentcredentials.org/verify</a>.</p>`);
+  $("#provBody").innerHTML=body.join("");
+}
+
+let current=null;
+function renderAction(r){
+  const rem=removable(r), total=rem.reduce((s,[,n])=>s+n,0);
+  const btn=$("#cleanBtn"); $("#result").hidden=true;
+  if(!total){$("#actTitle").textContent="Rien à retirer";$("#actText").textContent="Ce fichier ne contient pas de métadonnées personnelles. Vous pouvez le publier tel quel.";btn.disabled=true;return;}
+  btn.disabled=false;
+  $("#actTitle").textContent=`${kb(total)} de métadonnées à retirer`;
+  const keep=[];if(r.c2pa)keep.push("les Content Credentials");if(r.dst&&(AI_SRC.test(r.dst)||r.aiHint))keep.push("le type de source IPTC");keep.push("le profil couleur");
+  $("#actText").textContent=`Retiré : ${rem.map(([k])=>k).join(", ")}. Conservé : ${keep.join(", ")}. L'image elle-même n'est pas réencodée.`+(r.c2pa?" Le fichier ayant changé, un vérificateur C2PA signalera une modification après signature.":"");
+}
+
+async function load(bytes,name,isSample){
+  const ban=$("#banner");
+  let r;
+  try{r=inspect(bytes);}catch(e){ban.className="banner error";ban.textContent=e.message;ban.hidden=false;return;}
+  if(isSample){ban.className="banner";ban.textContent="Exemple : photo fictive avec une position GPS et un nom d'auteur. Déposez votre propre photo pour l'analyser.";ban.hidden=false;}else ban.hidden=true;
+  current={bytes,name,r};
+  let bin="";for(let k=0;k<bytes.length;k+=0x8000)bin+=String.fromCharCode.apply(null,bytes.subarray(k,k+0x8000));const url="data:image/"+r.format+";base64,"+btoa(bin);
+  const img=$("#thumb"); img.onload=()=>{$("#fmeta").textContent=`${r.format.toUpperCase()} · ${img.naturalWidth} × ${img.naturalHeight} px · ${kb(r.size)}`;}; img.src=url;
+  $("#fname").textContent=name; $("#fmeta").textContent=`${r.format.toUpperCase()} · ${kb(r.size)}`;
+  renderPrivacy(r); renderProv(r); renderAction(r);
+  $("#report").hidden=false;
+}
+
+async function readFile(f){if(!f)return;const buf=new Uint8Array(await f.arrayBuffer());load(buf,f.name||"image",false);}
+$("#file").addEventListener("change",e=>{readFile(e.target.files[0]);e.target.value="";});
+const drop=$("#drop");
+["dragenter","dragover"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add("over");}));
+["dragleave","drop"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.remove("over");}));
+drop.addEventListener("drop",e=>readFile(e.dataTransfer.files[0]));
+document.addEventListener("paste",e=>{const f=[...(e.clipboardData&&e.clipboardData.files||[])][0];if(f)readFile(f);});
+
+const dlPromise=(window.claude&&typeof window.claude.use==="function")?window.claude.use("downloads").catch(()=>null):Promise.resolve(undefined);
+$("#cleanBtn").addEventListener("click",async()=>{
+  if(!current)return;
+  const res=$("#result");
+  const {out,keptDST}=clean(current.bytes,current.r);
+  const after=inspect(out);
+  const left=removable(after).length;
+  const ext={jpeg:"jpg",png:"png",webp:"webp"}[current.r.format];
+  const base=current.name.replace(/\.[^.]+$/,"")||"photo";
+  const fname=`${base}_sans-donnees-perso.${ext}`;
+  const ok=`<span class="chip ok">${left?"Nettoyage partiel":"Vérifié : aucune donnée personnelle restante"}</span> ${kb(out.length)}${after.c2pa?" · Content Credentials conservés":""}${keptDST?" · Type de source IA conservé":""}`;
+  res.hidden=false; res.innerHTML=ok;
+  const dl=await dlPromise;
+  if(dl){
+    try{await dl.save({filename:fname,data:new Blob([out])});res.innerHTML=ok+" · Fichier enregistré.";}
+    catch(e){res.innerHTML=ok+(e&&e.code==="declined"?" · Enregistrement annulé.":" · L'enregistrement n'est pas disponible ici.");}
+  }else if(dl===null){res.innerHTML=ok+" · Le téléchargement n'est pas disponible dans cette vue.";}
+  else{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([out],{type:"image/"+current.r.format}));a.download=fname;document.body.appendChild(a);a.click();a.remove();}
+});
+
+window.Revelateur={inspect,clean};
+const s=Uint8Array.from(atob(SAMPLE_B64),c=>c.charCodeAt(0));
+load(s,"exemple_montmartre.jpg",true);
+})();
+</script>
+
+</body>
+</html>
